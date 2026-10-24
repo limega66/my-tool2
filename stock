@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>股票篩選・買賣訊號工具</title>
+<style>
+:root{
+  --bg:#f3f5f4; --panel:#ffffff; --ink:#1b2622; --sub:#5d6b65; --line:#d9e0dc;
+  --up:#c8372d; --down:#1c8a55; --hold:#7a8580; --accent:#16473a; --accent-ink:#ffffff; --chip:#e8eeeb;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#121917; --panel:#1b2420; --ink:#e6eeea; --sub:#93a39b; --line:#2c3933;
+  --up:#ef6a5e; --down:#4cc88a; --hold:#8a9a92; --accent:#4cc88a; --accent-ink:#0f1a15; --chip:#25312c;}
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;font-size:14px;line-height:1.5}
+.wrap{max-width:1200px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:.02em}
+.lead{color:var(--sub);margin:0 0 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
+.panel h2{font-size:15px;margin:0 0 10px}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+label{display:block;font-size:12px;color:var(--sub);margin-bottom:3px}
+input,select,textarea{width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:90px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+input:focus,select:focus,textarea:focus,button:focus-visible,th:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end}
+.row>div{flex:1;min-width:130px}
+button{padding:8px 14px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);border-radius:6px;font:inherit;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+button:hover{opacity:.88}
+button:disabled{opacity:.5;cursor:wait}
+.msg{margin-top:10px;padding:8px 10px;border-radius:6px;background:var(--chip);color:var(--ink);display:none}
+.msg.err{border-left:4px solid var(--up)} .msg.ok{border-left:4px solid var(--down)}
+.tablebox{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:860px}
+th,td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
+th{font-weight:600;color:var(--sub);cursor:pointer;user-select:none;font-size:12px}
+th.sorted::after{content:" ▾"} th.sorted.asc::after{content:" ▴"}
+tbody tr{cursor:pointer} tbody tr:hover,tbody tr.sel{background:var(--chip)}
+.up{color:var(--up)} .down{color:var(--down)}
+.tag{display:inline-block;padding:2px 10px;border-radius:12px;font-weight:600;font-size:12px;color:#fff}
+.tag.buy{background:var(--up)} .tag.sell{background:var(--down)} .tag.hold{background:var(--hold)}
+.detail{display:grid;gap:14px;grid-template-columns:2fr 1fr}
+@media(max-width:800px){.detail{grid-template-columns:1fr}}
+canvas{width:100%;height:320px;display:block}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--sub);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:4px}
+ul.why{margin:0;padding-left:18px} ul.why li{margin-bottom:6px}
+.note{color:var(--sub);font-size:12px;margin-top:14px}
+.empty{padding:26px;text-align:center;color:var(--sub)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>股票篩選・買賣訊號工具</h1>
+  <p class="lead">匯入歷史收盤價，自動計算均線、RSI、MACD、KD，依分數給出買進／賣出／觀望訊號。</p>
+
+  <div class="panel">
+    <h2>1. 載入資料</h2>
+    <div class="row">
+      <div><label for="demoBtn">先用模擬資料試試</label><button id="demoBtn" type="button">載入 12 檔模擬股票</button></div>
+      <div><label for="twCode">台股代號（線上抓取近 6 個月）</label><input id="twCode" placeholder="例如 2330，可用逗號分隔多檔"></div>
+      <div style="flex:0 0 auto"><button id="twBtn" type="button">線上抓取</button></div>
+      <div style="flex:0 0 auto"><button id="clearBtn" type="button" class="ghost">清空全部</button></div>
+    </div>
+    <details style="margin-top:12px">
+      <summary style="cursor:pointer;color:var(--sub)">或貼上自己的 CSV 資料</summary>
+      <div class="row" style="margin-top:10px">
+        <div style="flex:0 0 140px"><label for="csvCode">代號</label><input id="csvCode" placeholder="2330"></div>
+        <div style="flex:0 0 160px"><label for="csvName">名稱</label><input id="csvName" placeholder="台積電"></div>
+      </div>
+      <label for="csvText" style="margin-top:8px">每行一筆，由舊到新。格式：日期,收盤價　或　日期,開,高,低,收,量</label>
+      <textarea id="csvText" placeholder="2026-01-02,980&#10;2026-01-03,985&#10;..."></textarea>
+      <div style="margin-top:8px"><button id="csvBtn" type="button">加入這檔股票</button></div>
+    </details>
+    <div id="msg" class="msg" role="status"></div>
+  </div>
+
+  <div class="panel">
+    <h2>2. 篩選條件</h2>
+    <div class="grid">
+      <div><label for="fSignal">訊號</label>
+        <select id="fSignal"><option value="all">全部</option><option value="buy">買進</option><option value="sell">賣出</option><option value="hold">觀望</option></select></div>
+      <div><label for="fScore">綜合分數 ≥</label><input id="fScore" type="number" value="-8" min="-8" max="8" step="1"></div>
+      <div><label for="fScoreMax">綜合分數 ≤</label><input id="fScoreMax" type="number" value="8" min="-8" max="8" step="1"></div>
+      <div><label for="fRsiMin">RSI 下限</label><input id="fRsiMin" type="number" value="0" min="0" max="100"></div>
+      <div><label for="fRsiMax">RSI 上限</label><input id="fRsiMax" type="number" value="100" min="0" max="100"></div>
+      <div><label for="fTrend">趨勢</label>
+        <select id="fTrend"><option value="all">不限</option><option value="above20">收盤在 20 日線上</option><option value="above60">收盤在 60 日線上</option><option value="bull">多頭排列（5&gt;20&gt;60）</option><option value="bear">空頭排列（5&lt;20&lt;60）</option></select></div>
+      <div><label for="fText">代號／名稱</label><input id="fText" placeholder="關鍵字"></div>
+    </div>
+    <div style="margin-top:10px"><button id="resetBtn" type="button" class="ghost">重設條件</button></div>
+  </div>
+
+  <div class="panel">
+    <h2>3. 篩選結果 <span id="count" style="color:var(--sub);font-weight:400"></span></h2>
+    <div class="tablebox">
+      <table>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div id="empty" class="empty">尚無資料，請先載入模擬資料或抓取股票。</div>
+  </div>
+
+  <div class="panel" id="detailPanel" style="display:none">
+    <h2 id="dTitle">個股分析</h2>
+    <div class="detail">
+      <div>
+        <canvas id="chart"></canvas>
+        <div class="legend">
+          <span><i style="background:var(--ink)"></i>收盤</span>
+          <span><i style="background:#e0a21a"></i>MA5</span>
+          <span><i style="background:#2f7fd1"></i>MA20</span>
+          <span><i style="background:#a45bc9"></i>MA60</span>
+        </div>
+      </div>
+      <div>
+        <div id="dSignal" style="margin-bottom:10px"></div>
+        <ul class="why" id="dWhy"></ul>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">提醒：本工具僅依技術指標做機械式判斷，模擬資料為隨機產生，不代表真實行情；訊號不構成投資建議，請自行評估風險。台股慣例：紅色代表上漲／買進，綠色代表下跌／賣出。</p>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------- 狀態 ---------- */
+var stocks = [];            // {code,name,dates[],closes[],ind,result}
+var sortKey = "score", sortAsc = false, selected = null;
+var $ = function(id){ return document.getElementById(id); };
+
+var COLS = [
+  ["code","代號"],["name","名稱"],["close","收盤"],["chg","漲跌%"],
+  ["ma5","MA5"],["ma20","MA20"],["ma60","MA60"],["rsi","RSI"],
+  ["hist","MACD柱"],["k","K"],["d","D"],["score","分數"],["signal","訊號"]
+];
+
+/* ---------- 工具函式 ---------- */
+function esc(s){ return String(s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];}); }
+function fmt(v,n){ return (v===null||v===undefined||isNaN(v)) ? "-" : Number(v).toFixed(n===undefined?2:n); }
+function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+function showMsg(text,type){
+  var m=$("msg"); m.textContent=text; m.className="msg "+(type||"ok"); m.style.display="block";
+}
+function last(a){ return a[a.length-1]; }
+
+/* ---------- 指標計算 ---------- */
+function sma(a,n){
+  var out=[],sum=0;
+  for(var i=0;i<a.length;i++){
+    sum+=a[i]; if(i>=n) sum-=a[i-n];
+    out.push(i>=n-1 ? sum/n : null);
+  }
+  return out;
+}
+function ema(a,n){
+  var k=2/(n+1),out=[],prev=null;
+  for(var i=0;i<a.length;i++){
+    if(a[i]===null){ out.push(null); continue; }
+    prev = (prev===null) ? a[i] : a[i]*k + prev*(1-k);
+    out.push(prev);
+  }
+  return out;
+}
+function rsi(a,n){
+  var out=[],g=0,l=0;
+  for(var i=0;i<a.length;i++){
+    if(i===0){ out.push(null); continue; }
+    var d=a[i]-a[i-1], up=Math.max(d,0), dn=Math.max(-d,0);
+    if(i<=n){
+      g+=up; l+=dn;
+      if(i===n){ g/=n; l/=n; out.push(l===0?100:100-100/(1+g/l)); } else out.push(null);
+    } else {
+      g=(g*(n-1)+up)/n; l=(l*(n-1)+dn)/n;
+      out.push(l===0?100:100-100/(1+g/l));
+    }
+  }
+  return out;
+}
+function macd(a){
+  var e12=ema(a,12), e26=ema(a,26), dif=[];
+  for(var i=0;i<a.length;i++) dif.push(i>=25 ? e12[i]-e26[i] : null);
+  var dea=ema(dif,9), hist=[];
+  for(var j=0;j<a.length;j++) hist.push(dif[j]!==null && dea[j]!==null ? dif[j]-dea[j] : null);
+  return {dif:dif,dea:dea,hist:hist};
+}
+/* 只有收盤價時，以近 9 日收盤的高低點近似 RSV */
+function kd(a,n){
+  var K=[],D=[],k=50,d=50;
+  for(var i=0;i<a.length;i++){
+    if(i<n-1){ K.push(null); D.push(null); continue; }
+    var w=a.slice(i-n+1,i+1), hi=Math.max.apply(null,w), lo=Math.min.apply(null,w);
+    var rsv = hi===lo ? 50 : (a[i]-lo)/(hi-lo)*100;
+    k = k*2/3 + rsv/3; d = d*2/3 + k/3;
+    K.push(k); D.push(d);
+  }
+  return {k:K,d:D};
+}
+
+/* ---------- 評分與訊號 ---------- */
+function analyze(s){
+  var c=s.closes, n=c.length;
+  var ind={ ma5:sma(c,5), ma20:sma(c,20), ma60:sma(c,60), rsi:rsi(c,14), macd:macd(c), kd:kd(c,9) };
+  s.ind=ind;
+  var i=n-1, reasons=[], score=0;
+  var m5=ind.ma5[i], m20=ind.ma20[i], m60=ind.ma60[i];
+  function add(p,t){ score+=p; reasons.push({p:p,t:t}); }
+
+  if(m5!==null && m20!==null && m60!==null){
+    if(m5>m20 && m20>m60) add(2,"均線多頭排列（MA5 > MA20 > MA60）");
+    else if(m5<m20 && m20<m60) add(-2,"均線空頭排列（MA5 < MA20 < MA60）");
+    else if(m5>m20) add(1,"短線均線在中期均線之上");
+    else add(-1,"短線均線在中期均線之下");
+  } else if(m5!==null && m20!==null){
+    add(m5>m20?1:-1, m5>m20?"MA5 在 MA20 之上":"MA5 在 MA20 之下");
+  }
+  if(m60!==null) add(c[i]>m60?1:-1, c[i]>m60?"收盤站上 60 日線":"收盤跌破 60 日線");
+
+  for(var b=0;b<3 && i-b-1>=0;b++){
+    var a1=ind.ma5[i-b],a0=ind.ma5[i-b-1],c1=ind.ma20[i-b],c0=ind.ma20[i-b-1];
+    if(a1!==null&&a0!==null&&c1!==null&&c0!==null){
+      if(a0<=c0 && a1>c1){ add(2,"近 3 日出現 MA5 上穿 MA20 的黃金交叉"); break; }
+      if(a0>=c0 && a1<c1){ add(-2,"近 3 日出現 MA5 下穿 MA20 的死亡交叉"); break; }
+    }
+  }
+  var r=ind.rsi[i];
+  if(r!==null){
+    if(r<30) add(1,"RSI "+r.toFixed(1)+" 進入超賣區，有反彈機會");
+    else if(r>70) add(-1,"RSI "+r.toFixed(1)+" 進入超買區，留意回檔");
+  }
+  var h=ind.macd.hist[i], hp=ind.macd.hist[i-1];
+  if(h!==null && hp!==null){
+    if(h>0 && h>hp) add(1,"MACD 柱狀體為正且擴大，動能轉強");
+    else if(h<0 && h<hp) add(-1,"MACD 柱狀體為負且擴大，動能轉弱");
+    if(hp<=0 && h>0) add(1,"MACD 柱狀體由負轉正");
+    if(hp>=0 && h<0) add(-1,"MACD 柱狀體由正轉負");
+  }
+  var K=ind.kd.k[i], D=ind.kd.d[i];
+  if(K!==null){
+    if(K<20 && K>D) add(1,"KD 低檔黃金交叉（K "+K.toFixed(0)+"）");
+    else if(K>80 && K<D) add(-1,"KD 高檔死亡交叉（K "+K.toFixed(0)+"）");
+  }
+  if(!reasons.length) reasons.push({p:0,t:"資料天數不足，無法判斷（至少需要約 30 日）"});
+
+  score=Math.max(-8,Math.min(8,score));
+  s.result={
+    close:c[i], chg: n>1 ? (c[i]-c[i-1])/c[i-1]*100 : 0,
+    ma5:m5, ma20:m20, ma60:m60, rsi:r, hist:h, k:K, d:D,
+    score:score, signal: score>=3?"buy":(score<=-3?"sell":"hold"), reasons:reasons
+  };
+}
+var SIGTXT={buy:"買進",sell:"賣出",hold:"觀望"};
+
+/* ---------- 模擬資料 ---------- */
+function rng(seed){ return function(){ seed=(seed*1664525+1013904223)%4294967296; return seed/4294967296; }; }
+function genDemo(){
+  var defs=[["D101","模擬半導體",.0018,.02],["D102","模擬航運",-.0014,.025],["D103","模擬金融",.0006,.009],
+    ["D104","模擬電子",.0012,.018],["D105","模擬生技",-.0006,.03],["D106","模擬食品",.0002,.008],
+    ["D107","模擬鋼鐵",-.001,.017],["D108","模擬AI伺服器",.0025,.028],["D109","模擬塑化",-.0003,.014],
+    ["D110","模擬營建",.0009,.012],["D111","模擬面板",-.0018,.022],["D112","模擬零售",.0004,.01]];
+  var list=[], today=new Date();
+  defs.forEach(function(d,idx){
+    var rand=rng(1000+idx*77), p=30+rand()*200, closes=[], dates=[];
+    for(var i=0;i<160;i++){
+      var u=rand()+rand()+rand()-1.5;      // 近似常態
+      p=Math.max(5,p*(1+d[2]+u*d[3]));
+      closes.push(Math.round(p*100)/100);
+      var dt=new Date(today.getTime()-(159-i)*86400000);
+      dates.push(dt.toISOString().slice(0,10));
+    }
+    list.push({code:d[0],name:d[1],dates:dates,closes:closes});
+  });
+  return list;
+}
+
+/* ---------- 加入股票 ---------- */
+function upsert(s){
+  if(s.closes.length<2) return false;
+  analyze(s);
+  var idx=stocks.findIndex(function(x){return x.code===s.code;});
+  if(idx>=0) stocks[idx]=s; else stocks.push(s);
+  return true;
+}
+
+function parseCSV(text){
+  var dates=[],closes=[];
+  text.split(/\r?\n/).forEach(function(line){
+    line=line.trim(); if(!line) return;
+    var p=line.split(/[,\t;]+/).map(function(x){return x.trim().replace(/,/g,"");});
+    var idx = p.length>=5 ? 4 : p.length-1;
+    var v=parseFloat(p[idx]);
+    if(!isNaN(v) && v>0 && p.length>=2){ dates.push(p[0]); closes.push(v); }
+  });
+  return {dates:dates,closes:closes};
+}
+
+async function fetchTW(code){
+  var now=new Date(), dates=[], closes=[], name=code;
+  for(var m=5;m>=0;m--){
+    var d=new Date(now.getFullYear(),now.getMonth()-m,1);
+    var ds=d.getFullYear()+String(d.getMonth()+1).padStart(2,"0")+"01";
+    var url="https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date="+ds+"&stockNo="+code+"&response=json";
+    var res=await fetch(url);
+    var j=await res.json();
+    if(j.stat==="OK" && j.data){
+      var t=(j.title||"").split(/\s+/); if(t.length>=3) name=t[2];
+      j.data.forEach(function(x){
+        var v=parseFloat(String(x[6]).replace(/,/g,""));
+        if(!isNaN(v)){ dates.push(x[0]); closes.push(v); }
+      });
+    }
+    await sleep(450);
+  }
+  return {code:code,name:name,dates:dates,closes:closes};
+}
+
+/* ---------- 篩選與表格 ---------- */
+function filtered(){
+  var sg=$("fSignal").value, smin=parseFloat($("fScore").value), smax=parseFloat($("fScoreMax").value);
+  var rmin=parseFloat($("fRsiMin").value), rmax=parseFloat($("fRsiMax").value);
+  var tr=$("fTrend").value, tx=$("fText").value.trim().toLowerCase();
+  if(isNaN(smin)) smin=-8; if(isNaN(smax)) smax=8; if(isNaN(rmin)) rmin=0; if(isNaN(rmax)) rmax=100;
+  return stocks.filter(function(s){
+    var r=s.result;
+    if(sg!=="all" && r.signal!==sg) return false;
+    if(r.score<smin || r.score>smax) return false;
+    if(r.rsi!==null && (r.rsi<rmin || r.rsi>rmax)) return false;
+    if(r.rsi===null && (rmin>0 || rmax<100)) return false;
+    if(tr==="above20" && !(r.ma20!==null && r.close>r.ma20)) return false;
+    if(tr==="above60" && !(r.ma60!==null && r.close>r.ma60)) return false;
+    if(tr==="bull" && !(r.ma60!==null && r.ma5>r.ma20 && r.ma20>r.ma60)) return false;
+    if(tr==="bear" && !(r.ma60!==null && r.ma5<r.ma20 && r.ma20<r.ma60)) return false;
+    if(tx && (s.code+" "+s.name).toLowerCase().indexOf(tx)<0) return false;
+    return true;
+  });
+}
+function valueOf(s,key){
+  if(key==="code") return s.code;
+  if(key==="name") return s.name;
+  if(key==="signal") return s.result.score;
+  var v=s.result[key]; return v===null||v===undefined ? -Infinity : v;
+}
+function renderHead(){
+  $("thead").innerHTML=COLS.map(function(c){
+    var cls = c[0]===sortKey ? "sorted"+(sortAsc?" asc":"") : "";
+    return '<th tabindex="0" data-k="'+c[0]+'" class="'+cls+'">'+c[1]+'</th>';
+  }).join("");
+}
+function colorCls(v){ return v>0?"up":(v<0?"down":""); }
+function renderTable(){
+  var list=filtered();
+  list.sort(function(a,b){
+    var x=valueOf(a,sortKey), y=valueOf(b,sortKey), r;
+    r = typeof x==="string" ? x.localeCompare(y) : x-y;
+    return sortAsc ? r : -r;
+  });
+  $("count").textContent = stocks.length ? "（符合 "+list.length+" / 共 "+stocks.length+" 檔）" : "";
+  $("empty").style.display = list.length ? "none" : "block";
+  if(stocks.length && !list.length) $("empty").textContent="沒有符合條件的股票，請放寬篩選條件。";
+  else if(!stocks.length) $("empty").textContent="尚無資料，請先載入模擬資料或抓取股票。";
+  renderHead();
+  $("tbody").innerHTML=list.map(function(s){
+    var r=s.result;
+    return '<tr data-c="'+esc(s.code)+'"'+(selected===s.code?' class="sel"':'')+'>'+
+      '<td>'+esc(s.code)+'</td><td>'+esc(s.name)+'</td>'+
+      '<td>'+fmt(r.close)+'</td>'+
+      '<td class="'+colorCls(r.chg)+'">'+(r.chg>0?"+":"")+fmt(r.chg)+'%</td>'+
+      '<td>'+fmt(r.ma5)+'</td><td>'+fmt(r.ma20)+'</td><td>'+fmt(r.ma60)+'</td>'+
+      '<td>'+fmt(r.rsi,1)+'</td>'+
+      '<td class="'+colorCls(r.hist)+'">'+fmt(r.hist,3)+'</td>'+
+      '<td>'+fmt(r.k,0)+'</td><td>'+fmt(r.d,0)+'</td>'+
+      '<td class="'+colorCls(r.score)+'"><b>'+(r.score>0?"+":"")+r.score+'</b></td>'+
+      '<td><span class="tag '+r.signal+'">'+SIGTXT[r.signal]+'</span></td></tr>';
+  }).join("");
+}
+
+/* ---------- 圖表與明細 ---------- */
+function renderDetail(){
+  var s=stocks.find(function(x){return x.code===selected;});
+  if(!s){ $("detailPanel").style.display="none"; return; }
+  $("detailPanel").style.display="block";
+  var r=s.result;
+  $("dTitle").textContent=s.code+" "+s.name+" 個股分析";
+  $("dSignal").innerHTML='<span class="tag '+r.signal+'">'+SIGTXT[r.signal]+'</span> 　綜合分數 <b class="'+colorCls(r.score)+'">'+(r.score>0?"+":"")+r.score+'</b>　<span style="color:var(--sub)">（≥3 買進，≤-3 賣出）</span>';
+  $("dWhy").innerHTML=r.reasons.map(function(x){
+    return '<li><b class="'+colorCls(x.p)+'">'+(x.p>0?"+":"")+x.p+'</b>　'+esc(x.t)+'</li>';
+  }).join("");
+  drawChart(s);
+}
+function drawChart(s){
+  var cv=$("chart"), dpr=window.devicePixelRatio||1;
+  var W=cv.clientWidth, H=cv.clientHeight;
+  cv.width=W*dpr; cv.height=H*dpr;
+  var g=cv.getContext("2d"); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  var N=Math.min(120,s.closes.length), st=s.closes.length-N;
+  var series=[
+    {a:s.closes.slice(st),c:getComputedStyle(document.body).color,w:2},
+    {a:s.ind.ma5.slice(st),c:"#e0a21a",w:1.3},
+    {a:s.ind.ma20.slice(st),c:"#2f7fd1",w:1.3},
+    {a:s.ind.ma60.slice(st),c:"#a45bc9",w:1.3}
+  ];
+  var all=[]; series.forEach(function(x){ x.a.forEach(function(v){ if(v!==null) all.push(v); }); });
+  var lo=Math.min.apply(null,all), hi=Math.max.apply(null,all), pad=(hi-lo)*0.06||1;
+  lo-=pad; hi+=pad;
+  var L=48,R=10,T=10,B=22, pw=W-L-R, ph=H-T-B;
+  var X=function(i){ return L+(N<=1?0:i/(N-1)*pw); };
+  var Y=function(v){ return T+(hi-v)/(hi-lo)*ph; };
+  g.font="11px sans-serif"; g.fillStyle="#8a9a92"; g.strokeStyle="rgba(128,140,134,.25)"; g.lineWidth=1;
+  for(var t=0;t<=4;t++){
+    var v=lo+(hi-lo)*t/4, y=Y(v);
+    g.beginPath(); g.moveTo(L,y); g.lineTo(W-R,y); g.stroke();
+    g.textAlign="right"; g.fillText(v.toFixed(1),L-6,y+4);
+  }
+  g.textAlign="center";
+  [0,Math.floor((N-1)/2),N-1].forEach(function(i){
+    g.fillText(String(s.dates[st+i]).slice(-10),Math.min(Math.max(X(i),L+24),W-R-24),H-6);
+  });
+  series.forEach(function(x){
+    g.strokeStyle=x.c; g.lineWidth=x.w; g.beginPath();
+    var started=false;
+    x.a.forEach(function(v,i){
+      if(v===null){ return; }
+      if(!started){ g.moveTo(X(i),Y(v)); started=true; } else g.lineTo(X(i),Y(v));
+    });
+    g.stroke();
+  });
+}
+
+/* ---------- 事件 ---------- */
+function refresh(){ renderTable(); renderDetail(); }
+
+$("demoBtn").addEventListener("click",function(){
+  genDemo().forEach(upsert);
+  showMsg("已載入 12 檔模擬股票（隨機產生的資料，僅供試用）。","ok");
+  refresh();
+});
+$("clearBtn").addEventListener("click",function(){
+  stocks=[]; selected=null; showMsg("已清空全部資料。","ok"); refresh();
+});
+$("csvBtn").addEventListener("click",function(){
+  var code=$("csvCode").value.trim(), name=$("csvName").value.trim()||code;
+  if(!code){ showMsg("請先輸入股票代號。","err"); return; }
+  var p=parseCSV($("csvText").value);
+  if(p.closes.length<30){ showMsg("有效資料只有 "+p.closes.length+" 筆，至少需要 30 筆才能算出指標。","err"); return; }
+  upsert({code:code,name:name,dates:p.dates,closes:p.closes});
+  showMsg("已加入 "+code+" "+name+"，共 "+p.closes.length+" 筆資料。","ok");
+  refresh();
+});
+$("twBtn").addEventListener("click",async function(){
+  var codes=$("twCode").value.split(/[,，\s]+/).filter(Boolean);
+  if(!codes.length){ showMsg("請輸入至少一個台股代號，例如 2330。","err"); return; }
+  var btn=$("twBtn"); btn.disabled=true;
+  var okList=[],failList=[];
+  for(var i=0;i<codes.length;i++){
+    showMsg("正在抓取 "+codes[i]+"（"+(i+1)+"/"+codes.length+"）…","ok");
+    try{
+      var s=await fetchTW(codes[i]);
+      if(upsert(s)) okList.push(codes[i]); else failList.push(codes[i]);
+    }catch(e){ failList.push(codes[i]); }
+  }
+  btn.disabled=false;
+  if(failList.length) showMsg("抓取失敗："+failList.join("、")+"。可能是代號不存在、網路不通，或瀏覽器擋下跨網域請求；請改用上方的 CSV 貼上。"+(okList.length?"　成功："+okList.join("、"):""),"err");
+  else showMsg("已加入："+okList.join("、"),"ok");
+  refresh();
+});
+["fSignal","fScore","fScoreMax","fRsiMin","fRsiMax","fTrend"].forEach(function(id){ $(id).addEventListener("change",renderTable); });
+["fScore","fScoreMax","fRsiMin","fRsiMax","fText"].forEach(function(id){ $(id).addEventListener("input",renderTable); });
+$("resetBtn").addEventListener("click",function(){
+  $("fSignal").value="all"; $("fScore").value=-8; $("fScoreMax").value=8;
+  $("fRsiMin").value=0; $("fRsiMax").value=100; $("fTrend").value="all"; $("fText").value="";
+  renderTable();
+});
+function onSort(e){
+  var th=e.target.closest("th"); if(!th) return;
+  var k=th.getAttribute("data-k");
+  if(sortKey===k) sortAsc=!sortAsc; else { sortKey=k; sortAsc=(k==="code"||k==="name"); }
+  renderTable();
+}
+$("thead").addEventListener("click",onSort);
+$("thead").addEventListener("keydown",function(e){ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); onSort(e); } });
+$("tbody").addEventListener("click",function(e){
+  var tr=e.target.closest("tr"); if(!tr) return;
+  selected=tr.getAttribute("data-c"); renderTable(); renderDetail();
+  $("detailPanel").scrollIntoView({behavior:"smooth",block:"nearest"});
+});
+window.addEventListener("resize",function(){ if(selected) renderDetail(); });
+
+renderHead();
+})();
+</script>
+</body>
+</html>
